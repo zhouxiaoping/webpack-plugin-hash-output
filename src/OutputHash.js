@@ -1,53 +1,57 @@
-const crypto = require('crypto');
-const fs = require('fs');
+const crypto = require("crypto");
+const fs = require("fs");
 
 function OutputHash({
-    manifestFiles = [],
-    validateOutput = false,
-    validateOutputRegex = /^.*$/,
+  manifestFiles = [],
+  validateOutput = false,
+  validateOutputRegex = /^.*$/
 } = {}) {
-    this.manifestFiles = manifestFiles;
-    this.validateOutput = validateOutput;
-    this.validateOutputRegex = validateOutputRegex;
+  this.manifestFiles = manifestFiles;
+  this.validateOutput = validateOutput;
+  this.validateOutputRegex = validateOutputRegex;
 }
 
 /**
  * Replaces a string in an asset
  */
 function replaceStringInAsset(asset, source, target) {
-    const sourceRE = new RegExp(source, 'g');
+  const sourceRE = new RegExp(source, "g");
 
-    if (typeof asset === 'string') {
-        return asset.replace(sourceRE, target);
-    }
+  if (typeof asset === "string") {
+    return asset.replace(sourceRE, target);
+  }
 
-    // ReplaceSource
-    if ('_source' in asset) {
-        asset._source = replaceStringInAsset(asset._source, source, target);
-        return asset;
-    }
+  // ReplaceSource
+  if ("_source" in asset) {
+    asset._source = replaceStringInAsset(asset._source, source, target);
+    return asset;
+  }
 
-    // CachedSource
-    if ('_cachedSource' in asset) {
-        asset._cachedSource = asset.source().replace(sourceRE, target);
-        return asset;
-    }
+  // CachedSource
+  if ("_cachedSource" in asset) {
+    asset._cachedSource = asset.source().replace(sourceRE, target);
+    return asset;
+  }
 
-    // RawSource / SourceMapSource
-    if ('_value' in asset) {
-        asset._value = asset.source().replace(sourceRE, target);
-        return asset;
-    }
+  // RawSource / SourceMapSource
+  if ("_value" in asset) {
+    asset._value = asset.source().replace(sourceRE, target);
+    return asset;
+  }
 
-    // ConcatSource
-    if ('children' in asset) {
-        asset.children = asset.children.map(child => replaceStringInAsset(child, source, target));
-        return asset;
-    }
+  // ConcatSource
+  if ("children" in asset) {
+    asset.children = asset.children.map(child =>
+      replaceStringInAsset(child, source, target)
+    );
+    return asset;
+  }
 
-    throw new Error(`Unknown asset type (${asset.constructor.name})!. ` +
-        'Unfortunately this type of asset is not supported yet. ' +
-        'Please raise an issue and we will look into it asap');
+  throw new Error(
+    `Unknown asset type (${asset.constructor.name})!. ` +
+      "Unfortunately this type of asset is not supported yet. " +
+      "Please raise an issue and we will look into it asap"
+  );
 }
 
 /**
@@ -57,32 +61,36 @@ function replaceStringInAsset(asset, source, target) {
  * secondary files (i.e source maps)
  */
 function reHashChunk(chunk, assets, hashFn) {
-    const oldHash = chunk.renderedHash;
-    const oldChunkName = chunk.files[0];
-    const asset = assets[oldChunkName];
-    const { fullHash, shortHash } = hashFn(asset.source());
-    const newChunkName = oldChunkName.replace(oldHash, shortHash);
+  const oldHash = chunk.renderedHash;
+  const oldChunkName = chunk.files[0];
+  const asset = assets[oldChunkName];
+  const { fullHash, shortHash } = hashFn(asset.source());
 
-    // Update the main file of the chunk with the new name
-    chunk.hash = fullHash;
-    chunk.renderedHash = shortHash;
-    chunk.files[0] = newChunkName;
+  const reg = new RegExp(
+    "^(\\S+\\.)([a-zA-Z0-9]{" + shortHash.length + "})(\\.js)$"
+  );
+  const newChunkName = oldChunkName.replace(reg, "$1" + shortHash + "$3");
 
-    // Update the asset associated with that file
-    asset._name = newChunkName;
-    delete assets[oldChunkName];
-    assets[newChunkName] = asset;
+  // Update the main file of the chunk with the new name
+  chunk.hash = fullHash;
+  chunk.renderedHash = shortHash;
+  chunk.files[0] = newChunkName;
 
-    // Update the content of the rest of the files in the chunk
-    chunk.files.slice(1).forEach((file) => {
-        const secondaryAsset = assets[file];
-        replaceStringInAsset(secondaryAsset, oldHash, shortHash);
-    });
+  // Update the asset associated with that file
+  asset._name = newChunkName;
+  delete assets[oldChunkName];
+  assets[newChunkName] = asset;
 
-    return {
-        oldHash,
-        newHash: shortHash,
-    };
+  // Update the content of the rest of the files in the chunk
+  chunk.files.slice(1).forEach(file => {
+    const secondaryAsset = assets[file];
+    replaceStringInAsset(secondaryAsset, oldHash, shortHash);
+  });
+
+  return {
+    oldHash,
+    newHash: shortHash
+  };
 }
 
 /**
@@ -93,97 +101,105 @@ function reHashChunk(chunk, assets, hashFn) {
  * collision and replace existing data.
  */
 function replaceOldHashForNewInChunkFiles(chunk, assets, oldHashToNewHashMap) {
-    chunk.files.forEach((file) => {
-        Object.keys(oldHashToNewHashMap).forEach((oldHash) => {
-            const newHash = oldHashToNewHashMap[oldHash];
-            replaceStringInAsset(assets[file], oldHash, newHash);
-        });
+  chunk.files.forEach(file => {
+    Object.keys(oldHashToNewHashMap).forEach(oldHash => {
+      const newHash = oldHashToNewHashMap[oldHash];
+      replaceStringInAsset(assets[file], oldHash, newHash);
     });
+  });
 }
 
 OutputHash.prototype.apply = function apply(compiler) {
-    let hashFn;
+  let hashFn;
 
-    compiler.plugin('emit', (compilation, callback) => {
-        const { outputOptions, chunks, assets } = compilation;
-        const { hashFunction, hashDigest, hashDigestLength, hashSalt } = outputOptions;
+  compiler.plugin("emit", (compilation, callback) => {
+    const { outputOptions, chunks, assets } = compilation;
+    const {
+      hashFunction,
+      hashDigest,
+      hashDigestLength,
+      hashSalt
+    } = outputOptions;
 
-        // Reuses webpack options
-        hashFn = (input) => {
-            const hashObj = crypto.createHash(hashFunction).update(input);
-            if (hashSalt) hashObj.update(hashSalt);
-            const fullHash = hashObj.digest(hashDigest);
-            return { fullHash, shortHash: fullHash.substr(0, hashDigestLength) };
-        };
+    // Reuses webpack options
+    hashFn = input => {
+      const hashObj = crypto.createHash(hashFunction).update(input);
+      if (hashSalt) hashObj.update(hashSalt);
+      const fullHash = hashObj.digest(hashDigest);
+      return { fullHash, shortHash: fullHash.substr(0, hashDigestLength) };
+    };
 
-        const nonManifestChunks = chunks.filter(
-            chunk => !this.manifestFiles.includes(chunk.name)
-        );
-        const chunksByDependency = [];
+    const nonManifestChunks = chunks.filter(
+      chunk => !this.manifestFiles.includes(chunk.name)
+    );
+    const chunksByDependency = [];
 
-        while (nonManifestChunks.length) {
-            let i = 0;
+    while (nonManifestChunks.length) {
+      let i = 0;
 
-            while (i < nonManifestChunks.length) {
-                const current = nonManifestChunks[i];
+      while (i < nonManifestChunks.length) {
+        const current = nonManifestChunks[i];
 
-                if (
-                    !current.parents
-                    || current.parents.length === 0
-                    || current.parents.every(p =>
-                        chunksByDependency.indexOf(p) !== -1
-                        || nonManifestChunks.indexOf(p) === -1
-                    )
-                ) {
-                    chunksByDependency.push(current);
-                    nonManifestChunks.splice(i, 1);
-                } else {
-                    i += 1;
-                }
-            }
+        if (
+          !current.parents ||
+          current.parents.length === 0 ||
+          current.parents.every(
+            p =>
+              chunksByDependency.indexOf(p) !== -1 ||
+              nonManifestChunks.indexOf(p) === -1
+          )
+        ) {
+          chunksByDependency.push(current);
+          nonManifestChunks.splice(i, 1);
+        } else {
+          i += 1;
         }
+      }
+    }
 
-        const chunksByDependencyDesc = chunksByDependency.reverse();
-        const nameMap = {};
+    const chunksByDependencyDesc = chunksByDependency.reverse();
+    const nameMap = {};
 
-        // We assume that only the manifest chunk has references to all the other chunks.
-        // It needs to be processed at the end, when we know the new names of all the other
-        // chunks. Non-manifest chunks are processed according to their references
-        // (most referenced -> least referenced).
-        chunksByDependencyDesc.forEach((chunk) => {
-            replaceOldHashForNewInChunkFiles(chunk, assets, nameMap);
-            const { newHash, oldHash } = reHashChunk(chunk, assets, hashFn);
-            nameMap[oldHash] = newHash;
-        });
-
-        // After the main files have been rehashed, we need to update the content of the
-        // manifest files to point to the new rehashed names, and rehash them.
-        chunks
-            .filter(chunk => this.manifestFiles.includes(chunk.name))
-            .forEach((chunk) => {
-                replaceOldHashForNewInChunkFiles(chunk, assets, nameMap);
-                reHashChunk(chunk, assets, hashFn);
-            });
-        callback();
+    // We assume that only the manifest chunk has references to all the other chunks.
+    // It needs to be processed at the end, when we know the new names of all the other
+    // chunks. Non-manifest chunks are processed according to their references
+    // (most referenced -> least referenced).
+    chunksByDependencyDesc.forEach(chunk => {
+      replaceOldHashForNewInChunkFiles(chunk, assets, nameMap);
+      const { newHash, oldHash } = reHashChunk(chunk, assets, hashFn);
+      nameMap[oldHash] = newHash;
     });
 
-    if (this.validateOutput) {
-        compiler.plugin('after-emit', (compilation, callback) => {
-            let err;
-            Object.keys(compilation.assets)
-                .filter(assetName => assetName.match(this.validateOutputRegex))
-                .forEach((assetName) => {
-                    const asset = compilation.assets[assetName];
-                    const path = asset.existsAt;
-                    const assetContent = fs.readFileSync(path, 'utf8');
-                    const { shortHash } = hashFn(assetContent);
-                    if (!assetName.includes(shortHash)) {
-                        err = new Error(`The hash in ${assetName} does not match the hash of the content (${shortHash})`);
-                    }
-                });
-            return callback(err);
+    // After the main files have been rehashed, we need to update the content of the
+    // manifest files to point to the new rehashed names, and rehash them.
+    chunks
+      .filter(chunk => this.manifestFiles.includes(chunk.name))
+      .forEach(chunk => {
+        replaceOldHashForNewInChunkFiles(chunk, assets, nameMap);
+        reHashChunk(chunk, assets, hashFn);
+      });
+    callback();
+  });
+
+  if (this.validateOutput) {
+    compiler.plugin("after-emit", (compilation, callback) => {
+      let err;
+      Object.keys(compilation.assets)
+        .filter(assetName => assetName.match(this.validateOutputRegex))
+        .forEach(assetName => {
+          const asset = compilation.assets[assetName];
+          const path = asset.existsAt;
+          const assetContent = fs.readFileSync(path, "utf8");
+          const { shortHash } = hashFn(assetContent);
+          if (!assetName.includes(shortHash)) {
+            err = new Error(
+              `The hash in ${assetName} does not match the hash of the content (${shortHash})`
+            );
+          }
         });
-    }
+      return callback(err);
+    });
+  }
 };
 
 module.exports = OutputHash;
