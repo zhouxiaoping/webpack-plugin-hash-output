@@ -124,11 +124,11 @@ OutputHash.prototype.apply = function apply(compiler) {
     } = outputOptions;
 
     // Reuses webpack options
-    hashFn = input => {
+    hashFn = (input, hashLen = hashDigestLength) => {
       const hashObj = crypto.createHash(hashFunction).update(input);
       if (hashSalt) hashObj.update(hashSalt);
       const fullHash = hashObj.digest(hashDigest);
-      return { fullHash, shortHash: fullHash.substr(0, hashDigestLength) };
+      return { fullHash, shortHash: fullHash.substr(0, hashLen) };
     };
 
     const nonManifestChunks = chunks.filter(
