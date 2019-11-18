@@ -61,7 +61,6 @@ function replaceStringInAsset(asset, source, target) {
  * secondary files (i.e source maps)
  */
 function reHashChunk(chunk, assets, hashFn) {
-  const oldHash = chunk.renderedHash;
   const oldChunkName = chunk.files[0];
   const asset = assets[oldChunkName];
   const realHashMatch = oldChunkName.match(/^\S+\.([a-z0-9]+)\.js$/);
@@ -70,8 +69,8 @@ function reHashChunk(chunk, assets, hashFn) {
     asset.source(),
     realHash && realHash.length
   );
-
-  const newChunkName = oldChunkName.replace(realHash || oldHash, shortHash);
+  const oldHash = realHash || chunk.renderedHash;
+  const newChunkName = oldChunkName.replace(oldHash, shortHash);
 
   // Update the main file of the chunk with the new name
   chunk.hash = fullHash;
