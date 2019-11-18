@@ -64,12 +64,14 @@ function reHashChunk(chunk, assets, hashFn) {
   const oldHash = chunk.renderedHash;
   const oldChunkName = chunk.files[0];
   const asset = assets[oldChunkName];
-  const { fullHash, shortHash } = hashFn(asset.source());
-
-  const reg = new RegExp(
-    "^(\\S+\\.)([a-zA-Z0-9]{" + shortHash.length + "})(\\.js)$"
+  const realHashMatch = oldChunkName.match(/^\S+\.([a-z0-9]+)\.js$/);
+  const realHash = realHashMatch && realHashMatch[1];
+  const { fullHash, shortHash } = hashFn(
+    asset.source(),
+    realHash && realHash.length
   );
-  const newChunkName = oldChunkName.replace(reg, "$1" + shortHash + "$3");
+
+  const newChunkName = oldChunkName.replace(realHash || oldHash, shortHash);
 
   // Update the main file of the chunk with the new name
   chunk.hash = fullHash;
